@@ -1,0 +1,29 @@
+# Dockerfile for Development Environment
+# This file sets up a container with all necessary dev dependencies and runs the dev server.
+
+FROM node:18-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Copy package management files
+COPY package*.json ./
+
+# Install all dependencies, including devDependencies
+# Using 'npm install' instead of 'npm ci' for flexibility in dev
+RUN npm install
+
+# Copy prisma schema to generate the client ahead of time
+COPY prisma ./prisma/
+RUN npx prisma generate
+
+# Copy the rest of the source code
+# Note: This will be overlaid by the volume mount in docker-compose.dev.yml,
+# but it's good practice for container standalone usability.
+COPY . .
+
+# Expose the port for the Next.js dev server
+EXPOSE 3000
+
+# Default command to start the development server with hot-reloading
+CMD ["npm", "run", "dev"]
