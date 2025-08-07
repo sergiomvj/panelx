@@ -6,8 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useMetrics } from '@/hooks/use-metrics'
-import { useMetricsHistory } from '@/hooks/use-metrics-history'
+import { useVpsStats } from '@/hooks/use-vps-stats'
 import { ProjectsList } from '@/components/projects/projects-list'
 import { ServicesList } from '@/components/services/services-list'
 import { DomainsList } from '@/components/domains/domains-list'
@@ -46,8 +45,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [currentView, setCurrentView] = useState('dashboard')
   const [subView, setSubView] = useState('');
-  const { metrics, loading, error } = useMetrics(3000) // Refresh every 3 seconds
-  const { metrics: history, loading: historyLoading } = useMetricsHistory(5000, 60)
+  const { stats, history, loading, error } = useVpsStats(5000, 60) // Refresh every 5 seconds
   
   // Process details dialog state
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
@@ -87,7 +85,7 @@ export default function Home() {
     <div className="space-y-6">
       {/* System Metrics Charts */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {historyLoading ? (
+        {loading ? (
           <>
             <Skeleton className="h-96" />
             <Skeleton className="h-96" />
@@ -134,7 +132,7 @@ export default function Home() {
             
             <MetricChart
               title="Network Traffic"
-              data={history.network.download}
+              data={[]}
               icon={Wifi}
               unit="MB/s"
               color="#8b5cf6"
@@ -148,7 +146,7 @@ export default function Home() {
       </div>
 
       {/* System Information */}
-      {metrics && (
+      {stats && (
         <Card>
           <CardHeader>
             <CardTitle>System Information</CardTitle>
@@ -159,42 +157,28 @@ export default function Home() {
               <div className="space-y-3">
                 <h4 className="font-medium flex items-center gap-2">
                   <Cpu size={16} />
-                  System Uptime
+                  CPU Usage
                 </h4>
-                <p className="text-2xl font-bold">{formatUptime(metrics.system.uptime)}</p>
-                <p className="text-sm text-muted-foreground">
-                  Since {new Date(Date.now() - metrics.system.uptime * 1000).toLocaleDateString()}
-                </p>
-              </div>
-              
-              <div className="space-y-3">
-                <h4 className="font-medium flex items-center gap-2">
-                  <Activity size={16} />
-                  Load Average
-                </h4>
-                <div className="space-y-1">
-                  {metrics.system.loadAverage.map((load, index) => (
-                    <div key={index} className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">
-                        {index === 0 ? '1min' : index === 1 ? '5min' : '15min'}
-                      </span>
-                      <span className="font-mono text-sm">{load.toFixed(2)}</span>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-2xl font-bold">{stats.cpu.toFixed(1)}%</p>
+                <p className="text-sm text-muted-foreground">Current usage</p>
               </div>
               
               <div className="space-y-3">
                 <h4 className="font-medium flex items-center gap-2">
                   <MemoryStick size={16} />
-                  Processes
+                  Memory
                 </h4>
-                <p className="text-2xl font-bold">{metrics.system.processes}</p>
-                <div className="flex gap-2">
-                  <Badge variant="outline">Active</Badge>
-                  <Badge variant="secondary">Sleeping</Badge>
-                  <Badge variant="destructive">Stopped</Badge>
-                </div>
+                <p className="text-2xl font-bold">{stats.memory.used} <span className="text-lg text-muted-foreground">/ {stats.memory.total} MB</span></p>
+                <p className="text-sm text-muted-foreground">Used / Total</p>
+              </div>
+              
+              <div className="space-y-3">
+                <h4 className="font-medium flex items-center gap-2">
+                  <HardDrive size={16} />
+                  Disk
+                </h4>
+                <p className="text-2xl font-bold">{stats.disk.used} <span className="text-lg text-muted-foreground">/ {stats.disk.total} ({stats.disk.percent})</span></p>
+                <p className="text-sm text-muted-foreground">Used / Total</p>
               </div>
             </div>
           </CardContent>

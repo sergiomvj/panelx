@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useProjects } from './use-projects'
 
 export interface Service {
   id: string
@@ -52,6 +53,7 @@ export interface ServiceBlueprint {
 }
 
 export function useServices() {
+  const { projects } = useProjects()
   const [services, setServices] = useState<Service[]>([])
   const [blueprints, setBlueprints] = useState<ServiceBlueprint[]>([])
   const [loading, setLoading] = useState(true)
@@ -59,7 +61,7 @@ export function useServices() {
 
   const fetchServices = async () => {
     try {
-      const response = await fetch('/api/services')
+      const response = await fetch(`/api/services?_=${new Date().getTime()}`)
       if (!response.ok) {
         throw new Error('Failed to fetch services')
       }
@@ -99,9 +101,9 @@ export function useServices() {
         throw new Error('Failed to create service')
       }
 
-      const newService = await response.json()
-      setServices(prev => [...prev, newService])
-      return newService
+      const result = await response.json();
+      await fetchServices(); // Re-fetch the list to show the new service
+      return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
       throw err
@@ -252,6 +254,7 @@ export function useServices() {
       volumes: config.volumes || blueprint.volumes.map(v => v.path),
       networks: config.networks || blueprint.networks,
       projectId: config.projectId,
+      projectName: projects.find(p => p.id === config.projectId)?.name,
       healthCheck: blueprint.healthCheck
     })
   }

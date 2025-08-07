@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server'
 
+export const dynamic = 'force-dynamic' // Garante que a rota seja sempre dinâmica
+import { NodeSSH } from 'node-ssh'
+
 interface Service {
   id: string
   name: string
@@ -32,113 +35,7 @@ const projects = [
   { id: '2', name: 'Data Analytics Pipeline' },
 ];
 
-// Mock services data - in a real implementation, this would come from Docker API
-let services: Service[] = [
-  {
-    id: '1',
-    name: 'web-server',
-    description: 'Nginx web server',
-    image: 'nginx:latest',
-    status: 'running',
-    ports: ['80:80', '443:443'],
-    environment: ['NGINX_HOST=example.com', 'NGINX_PORT=80'],
-    volumes: ['/var/www/html:/usr/share/nginx/html'],
-    networks: ['web-network'],
-    cpu: 2.5,
-    memory: 128,
-    restartPolicy: 'unless-stopped',
-    createdAt: '2024-01-15T10:30:00Z',
-    updatedAt: '2024-01-20T15:45:00Z',
-    projectId: '1',
-    projectName: 'E-commerce Platform',
-    healthCheck: {
-      enabled: true,
-      interval: 30,
-      timeout: 10,
-      retries: 3,
-      test: ['CMD', 'curl', '-f', 'http://localhost/']
-    }
-  },
-  {
-    id: '2',
-    name: 'api-server',
-    description: 'Node.js API server',
-    image: 'node:18-alpine',
-    status: 'running',
-    ports: ['3000:3000'],
-    environment: ['NODE_ENV=production', 'PORT=3000'],
-    volumes: ['/app:/app'],
-    networks: ['api-network'],
-    cpu: 15.2,
-    memory: 512,
-    restartPolicy: 'unless-stopped',
-    createdAt: '2024-01-10T14:20:00Z',
-    updatedAt: '2024-01-19T09:30:00Z',
-    projectId: '2',
-    projectName: 'Data Analytics Pipeline',
-    healthCheck: {
-      enabled: true,
-      interval: 30,
-      timeout: 10,
-      retries: 3,
-      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/health']
-    }
-  },
-  {
-    id: '3',
-    name: 'database',
-    description: 'PostgreSQL database',
-    image: 'postgres:15',
-    status: 'running',
-    ports: ['5432:5432'],
-    environment: [
-      'POSTGRES_DB=myapp',
-      'POSTGRES_USER=user',
-      'POSTGRES_PASSWORD=pass'
-    ],
-    volumes: ['/var/lib/postgresql/data:/var/lib/postgresql/data'],
-    networks: ['db-network'],
-    cpu: 8.7,
-    memory: 1024,
-    restartPolicy: 'unless-stopped',
-    createdAt: '2024-01-05T16:45:00Z',
-    updatedAt: '2024-01-18T11:15:00Z',
-    projectId: '1',
-    projectName: 'E-commerce Platform',
-    healthCheck: {
-      enabled: true,
-      interval: 30,
-      timeout: 10,
-      retries: 3,
-      test: ['CMD-SHELL', 'pg_isready -U user']
-    }
-  },
-  {
-    id: '4',
-    name: 'redis-cache',
-    description: 'Redis cache server',
-    image: 'redis:7-alpine',
-    status: 'stopped',
-    ports: ['6379:6379'],
-    environment: [],
-    volumes: ['/data:/data'],
-    networks: ['cache-network'],
-    cpu: 0,
-    memory: 0,
-    restartPolicy: 'unless-stopped',
-    createdAt: '2024-01-08T12:00:00Z',
-    updatedAt: '2024-01-18T10:00:00Z',
-    projectId: '2',
-    projectName: 'Data Analytics Pipeline',
-    healthCheck: {
-      enabled: false,
-      interval: 0,
-      timeout: 0,
-      retries: 0,
-      test: []
-    }
-  }
-]
+
 
 // Service blueprints/templates
 const blueprints = [
@@ -264,94 +161,154 @@ const blueprints = [
   }
 ]
 
+
+
+// Helper function to map Docker's container state to our service status
+const mapDockerStateToStatus = (state: string): Service['status'] => {
+  if (state.startsWith('Up')) {
+    return 'running'
+  } else if (state.startsWith('Exited')) {
+    return 'stopped'
+  } else if (state.startsWith('Created')) {
+    return 'creating'
+  } else if (state.includes('restarting')) {
+    return 'restarting'
+  }
+  return 'error'
+}
+
 export async function GET() {
+  const ssh = new NodeSSH()
+
   try {
+    await ssh.connect({
+      host: process.env.VPS_HOST,
+      username: process.env.VPS_USER,
+      privateKeyPath: process.env.VPS_PRIVATE_KEY_PATH,
+    })
+
+    const command = `docker ps -a --format '{{json .}}'`
+    const result = await ssh.execCommand(command)
+
+    if (result.stderr) {
+      throw new Error(`Docker command failed: ${result.stderr}`)
+    }
+
+    // Each line of stdout is a JSON object for a container
+    const dockerServices = result.stdout
+      .trim()
+      .split('\n')
+      .map(line => {
+        try {
+          return JSON.parse(line)
+        } catch (e) {
+          console.error('Failed to parse Docker JSON line:', line)
+          return null
+        }
+      })
+      .filter(item => item !== null)
+
+    // Map Docker data to our Service interface
+    const services: Service[] = dockerServices.map(dockerService => ({
+      id: dockerService.ID,
+      name: dockerService.Names,
+      description: `Image: ${dockerService.Image}`,
+      image: dockerService.Image,
+      status: mapDockerStateToStatus(dockerService.Status),
+      ports: dockerService.Ports.split(', ').filter(p => p),
+      environment: [], // Requires 'docker inspect' for details
+      volumes: dockerService.Mounts.split(', ').filter(m => m),
+      networks: dockerService.Networks.split(', ').filter(n => n),
+      cpu: 0, // Requires 'docker stats' for live data
+      memory: 0, // Requires 'docker stats' for live data
+      restartPolicy: '', // Requires 'docker inspect' for details
+      createdAt: dockerService.CreatedAt,
+      updatedAt: new Date().toISOString(), // Placeholder
+      projectId: null, // Placeholder, requires labels
+      projectName: undefined, // Placeholder, requires labels
+      healthCheck: { enabled: false, interval: 0, timeout: 0, retries: 0, test: [] }, // Placeholder
+    }))
+
     return NextResponse.json({
       services,
       blueprints,
-      total: services.length
+      total: services.length,
     })
-  } catch (error) {
-    console.error('Error fetching services:', error)
+  } catch (error: any) {
+    console.error('Error fetching services from Docker:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch services' },
-      { status: 500 }
+      { error: 'Failed to fetch services', details: error.message },
+      { status: 500 },
     )
+  } finally {
+    ssh.dispose()
   }
 }
 
 export async function POST(request: Request) {
+  const ssh = new NodeSSH()
   try {
-    const body = await request.json()
-    const { 
-      name, 
-      description, 
-      image, 
-      ports, 
-      environment, 
-      volumes, 
-      networks, 
-      restartPolicy,
-      projectId,
-      healthCheck
-    } = body
+    const body = await request.json();
+    const {
+      name,
+      image,
+      ports = [],
+      environment = [],
+      volumes = [],
+      restartPolicy = 'unless-stopped',
+    } = body;
 
     if (!name || !image) {
       return NextResponse.json(
         { error: 'Service name and image are required' },
-        { status: 400 }
-      )
+        { status: 400 },
+      );
     }
 
-    const project = projects.find(p => p.id === projectId);
+    // Construct the docker run command
+    let command = 'docker run -d';
+    command += ` --name ${name}`;
+    if (restartPolicy) {
+      command += ` --restart ${restartPolicy}`;
+    }
+    ports.forEach((port: string) => {
+      command += ` -p ${port}`;
+    });
+    volumes.forEach((volume: string) => {
+      command += ` -v ${volume}`;
+    });
+    environment.forEach((env: string) => {
+      command += ` -e "${env}"`;
+    });
+    command += ` ${image}`;
 
-    const newService: Service = {
-      id: Date.now().toString(),
-      name,
-      description: description || '',
-      image,
-      status: 'creating',
-      ports: ports || [],
-      environment: environment || [],
-      volumes: volumes || [],
-      networks: networks || ['default'],
-      cpu: 0,
-      memory: 0,
-      restartPolicy: restartPolicy || 'unless-stopped',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      projectId: projectId || null,
-      projectName: project ? project.name : undefined,
-      healthCheck: healthCheck || {
-        enabled: false,
-        interval: 30,
-        timeout: 10,
-        retries: 3,
-        test: []
+    // Connect and execute the command
+    await ssh.connect({
+      host: process.env.VPS_HOST,
+      username: process.env.VPS_USER,
+      privateKeyPath: process.env.VPS_PRIVATE_KEY_PATH,
+    });
+
+    const result = await ssh.execCommand(command);
+
+    if (result.stderr) {
+      // Docker often prints the container ID to stderr on success, so we check for error keywords
+      if (result.stderr.toLowerCase().includes('error') || result.stderr.toLowerCase().includes('cannot')) {
+         throw new Error(`Failed to create Docker container: ${result.stderr}`);
       }
     }
 
-    services.push(newService)
-
-    // Simulate service creation process
-    setTimeout(() => {
-      const serviceIndex = services.findIndex(s => s.id === newService.id)
-      if (serviceIndex !== -1) {
-        services[serviceIndex] = {
-          ...services[serviceIndex],
-          status: 'running',
-          cpu: Math.random() * 20,
-          memory: Math.random() * 1024
-        }
-      }
-    }, 3000)
-
-    return NextResponse.json(newService, { status: 201 })
-  } catch (error) {
-    console.error('Error creating service:', error)
     return NextResponse.json(
-      { error: 'Failed to create service' },
-      { status: 500 }
-    )
+      { message: 'Service created successfully', containerId: result.stdout || result.stderr },
+      { status: 201 },
+    );
+  } catch (error: any) {
+    console.error('Error creating service:', error);
+    return NextResponse.json(
+      { error: 'Failed to create service', details: error.message },
+      { status: 500 },
+    );
+  } finally {
+    ssh.dispose();
   }
 }
