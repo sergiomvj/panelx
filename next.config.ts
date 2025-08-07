@@ -13,6 +13,11 @@ const nextConfig: NextConfig = {
     // 构建时忽略ESLint错误
     ignoreDuringBuilds: true,
   },
+
+  webpack: (config) => {
+    config.externals.push('ssh2');
+    return config;
+  },
 };
 
 export default nextConfig;
